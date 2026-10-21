@@ -26,8 +26,9 @@ It refuses error envelopes and permission denials, including errors with a zero
 process exit code. JSON is read from stdout separately from stderr diagnostics.
 Claude and Pi reviewers have read-only tool allowlists without a general shell;
 easy-ref runs independent checks itself. No adapter enables sandbox network
-access. If a harness cannot commit under these permissions, the loop stops for
-the owner; it never retries with wider permissions. Older versions missing any
+access. Builders edit without committing; easy-ref stages and commits outside
+the harness, with Git hooks disabled. A host commit failure stops for the owner;
+it never retries with wider harness permissions. Older versions missing any
 required option are refused rather than given weaker settings.
 
 Pi remains unsandboxed even with its read-only reviewer tools: opt-in is required

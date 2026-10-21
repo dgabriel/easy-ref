@@ -171,8 +171,8 @@ def prompt(state, role):
               + 'Owner decisions:\n' + '\n'.join(state['decisions']))
     if role == 'builder':
         return (common + '\nRequired fixes:\n' + state.get('feedback', '') +
-                '\nCommit your changes locally and return a hand-back.\n' +
-                ('Commit the fix order with the fix: ' + state['fix_order'] if state.get('fix_order') else ''))
+                '\nDo not commit. easy-ref commits your changes. Start your hand-back with a one-line commit subject, 72 characters or fewer.\n' +
+                ('Keep this fix order with your edits; easy-ref will commit it with the fix: ' + state['fix_order'] if state.get('fix_order') else ''))
     head = git(state['worktree'], 'rev-parse', 'HEAD')
     diff = git(state['worktree'], 'diff', state['base'], '--')
     if len(diff.encode()) > 64000:
@@ -201,6 +201,46 @@ def call(state, directory, role, adapter):
         raise ValueError('adapter log missing or outside round directory')
     (directory / f'{role}-final.txt').write_text(result.final_message)
     return result.final_message
+
+
+def commit_subject(state):
+    first = state['handback'].partition('\n')[0].strip()
+    if first and len(first) <= 72 and first.isprintable():
+        return first
+    return f"easy-ref: {state['branch'].removeprefix('ref/')} round {state['round']}"
+
+
+def commit_builder_changes(state, directory, start_head):
+    """Commit outside the harness, without running builder-controlled Git hooks."""
+    worktree = state['worktree']
+    git(worktree, 'merge-base', '--is-ancestor', start_head, 'HEAD')
+    state['phase'] = 'committing'
+    save(state)  # Interrupted staging/commit requires owner inspection, not replay.
+    args = ['git', '-C', worktree, '-c', 'core.hooksPath=/dev/null']
+
+    def command(arguments, name):
+        return guarded(state, lambda env: execute(
+            args + arguments, worktree, directory / name, 30, env,
+            lambda: stop_requested(state)))
+
+    if command(['add', '-A'], 'stage.log') != 0:
+        raise ValueError('could not stage builder changes')
+    difference = command(['diff', '--cached', '--no-ext-diff', '--quiet', '--exit-code'], 'staged-diff.log')
+    if difference not in (0, 1):
+        raise ValueError('could not verify staged builder changes')
+    if difference == 1:
+        subject = commit_subject(state)
+        (directory / 'commit-subject.txt').write_text(subject + '\n')
+        if command(['commit', '--no-verify', '-m', subject], 'commit.log') != 0:
+            raise ValueError('could not commit builder changes')
+    head = git(worktree, 'rev-parse', 'HEAD')
+    git(worktree, 'merge-base', '--is-ancestor', start_head, head)
+    if head == start_head:
+        raise ValueError('builder produced no changes')
+    dirty = git(worktree, 'status', '--porcelain=v1', '--untracked-files=all')
+    if dirty:
+        (directory / 'uncommitted.txt').write_text(dirty + '\n')
+        raise ValueError('worktree is not clean after committing builder changes: ' + dirty)
 
 
 def run(directory, builder, reviewer, notify=print, prepare=None):
@@ -233,18 +273,7 @@ def run(directory, builder, reviewer, notify=print, prepare=None):
                     before = git(state['worktree'], 'rev-parse', 'HEAD')
                     state['handback'] = call(state, rd, 'builder', builder)
                     (rd / 'hand-back.txt').write_text(state['handback'])
-                    after = git(state['worktree'], 'rev-parse', 'HEAD')
-                    if before == after:
-                        raise ValueError('builder made no new commit')
-                    git(state['worktree'], 'merge-base', '--is-ancestor', before, after)
-                    dirty = git(state['worktree'], 'status', '--porcelain=v1', '--untracked-files=all')
-                    if dirty:
-                        state['checks'] = []
-                        state['feedback'] = 'Commit or remove all uncommitted paths before checks/review:\n' + dirty
-                        (rd / 'uncommitted.txt').write_text(dirty + '\n')
-                        state['phase'] = 'build'
-                        save(state)
-                        continue
+                    commit_builder_changes(state, rd, before)
                     check(state, rd)
                 else:
                     # Answers to reviewer questions require fresh checks and identity validation.

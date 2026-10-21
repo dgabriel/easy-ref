@@ -11,7 +11,7 @@ from .config import resolve
 
 
 def git(repo, *args):
-    return subprocess.check_output(['git', '-C', str(repo), *args], text=True, stderr=subprocess.PIPE).strip()
+    return subprocess.check_output(['git', '-C', str(repo), '-c', 'core.hooksPath=/dev/null', *args], text=True, stderr=subprocess.PIPE).strip()
 
 
 def save(state):

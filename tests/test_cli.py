@@ -38,7 +38,7 @@ class CliTests(RepoTest):
 
     def test_run_status_complete(self):
         code, out, err = self.invoke(['run', str(self.order), '--notifier', 'terminal'],
-                                    VerifiedFake(['commit']), VerifiedFake([verdict()]))
+                                    VerifiedFake(['edit']), VerifiedFake([verdict()]))
         self.assertEqual(code, 0, err)
         run_id = out.splitlines()[0].removeprefix('Run: ')
         directory = locate(self.repo, run_id)
@@ -48,7 +48,7 @@ class CliTests(RepoTest):
         self.assertEqual(json.loads(out)['status'], 'DONE')
 
     def test_cli_answer_resumes_reviewer(self):
-        builder = VerifiedFake(['commit'])
+        builder = VerifiedFake(['edit'])
         reviewer = VerifiedFake([verdict('NEEDS_OWNER'), verdict()])
         code, out, err = self.invoke(['run', str(self.order)], builder, reviewer)
         self.assertEqual(code, 2)
@@ -111,7 +111,7 @@ class CliTests(RepoTest):
         (self.repo / 'easy-ref.toml').write_text('round_limit = 1\nnotifier = "terminal"\n')
         code, out, err = self.invoke(['run', str(self.order), '--round-limit', '2',
                                     '--check', f'{sys.executable} -c "print(42)"'],
-                                    VerifiedFake(['commit']), VerifiedFake([verdict()]))
+                                    VerifiedFake(['edit']), VerifiedFake([verdict()]))
         self.assertEqual(code, 0, err)
         state = load(locate(self.repo, out.splitlines()[0].removeprefix('Run: ')))
         self.assertEqual(state['config']['round_limit'], 2)
@@ -147,7 +147,7 @@ class CliTests(RepoTest):
             path.chmod(0o700)
         env = os.environ.copy()
         env.update(PATH=str(binary) + os.pathsep + env['PATH'],
-                   PYTHONPATH=str(Path(__file__).resolve().parents[1]), FAKE_COMMIT='1',
+                   PYTHONPATH=str(Path(__file__).resolve().parents[1]), FAKE_EDIT='1',
                    FAKE_HELP=' '.join(Codex.flags + Claude.flags), FAKE_CAPTURE=str(self.root / 'capture.json'))
         result = subprocess.run([sys.executable, '-m', 'easy_ref', 'run', str(self.order),
                                  '--repo', str(self.repo), '--notifier', 'terminal'],

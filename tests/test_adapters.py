@@ -29,10 +29,8 @@ capture.write_text(json.dumps({'args': args, 'cwd': os.getcwd(), 'stdin': stdin,
                               'git_block': os.environ.get('GIT_CONFIG_VALUE_1')}))
 value = {'verdict': 'APPROVE', 'summary': 'Reviewed', 'required': [], 'owner_question': None}
 if kind == 'codex':
-    if os.environ.get('FAKE_COMMIT') and args[args.index('--sandbox') + 1] == 'workspace-write':
+    if os.environ.get('FAKE_EDIT') and args[args.index('--sandbox') + 1] == 'workspace-write':
         pathlib.Path('built-by-cli').write_text('committed')
-        subprocess.run(['git', 'add', '.'], check=True)
-        subprocess.run(['git', 'commit', '-qm', 'fake build'], check=True)
     result = args[args.index('--output-last-message') + 1]
     pathlib.Path(result).write_text(json.dumps(value) if '--output-schema' in args else 'Built')
     print('fake progress')

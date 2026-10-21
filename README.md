@@ -1,7 +1,7 @@
 # easy-ref
 
 A referee for local builder/reviewer agent loops. Give it a work order: easy-ref
-creates a separate Git worktree, asks the builder for committed work, runs your
+creates a separate Git worktree, asks the builder for edits, commits them, runs your
 checks independently, and obtains a strict review verdict. It repeats until the
 work is approved, a stop condition is reached, or an owner decision is needed.
 
@@ -92,10 +92,18 @@ remain outside the target checkout and Git directories. Existing branches or
 worktree paths are refused, and only one unfinished run per target checkout is
 allowed. The owner's tracked checkout is never the agent's working directory.
 
-The builder must make a new descendant commit and leave the worktree clean,
-ignoring ignored files. Otherwise uncommitted paths become a required fix in the
-next builder round, without running checks/review. A builder with no new commit
-stops for the owner. Reviewer changes to tracked/non-ignored files, the index,
+The builder edits files and must not commit. easy-ref stages all non-ignored
+changes with `git add -A` and commits them outside the harness sandbox before
+checks/review. The first line of the hand-back supplies the commit subject when
+it is nonempty, printable, and at most 72 characters; otherwise easy-ref uses
+`easy-ref: <order-slug> round <n>`. Any builder-created commits are kept if they
+descend from the round's starting HEAD, and easy-ref commits leftover edits.
+No changes and no builder commits stops for the owner. The worktree must be clean
+after the commit, ignoring ignored files; a failed commit or dirty assertion
+stops for the owner. Host Git operations disable hooks with
+`-c core.hooksPath=/dev/null`, and commits also use `--no-verify`, so a
+builder-written tracked hook cannot execute during these operations. Reviewer
+changes to tracked/non-ignored files, the index,
 or HEAD stop for the owner. Changed ignored files, such as Python caches, are
 reported in summaries and later prompts and do not block approval.
 
@@ -121,14 +129,18 @@ These publishing guardrails are **best-effort, not isolation**:
   or files, hooks, and arbitrary trusted check scripts can evade snapshot checks.
 - Ignored files never reach the branch and are tolerated, but may still affect
   subsequent checks. Review the ignored-path report before relying on a run.
-- Harness permissions can deny a builder's Git commit. That stops for the owner;
-  easy-ref never retries using wider permissions or enables sandbox network access.
+- easy-ref commits outside the harness sandbox so builders do not need write
+  access to Git metadata. It never widens harness permissions or enables sandbox
+  network access to make a commit succeed.
 
 Codex uses workspace-write/read-only sandboxes. Claude confines file tools and
 requires a sandbox for builder shell commands, with unsandboxed fallback disabled.
 Claude and Pi reviewers have read-only tool allowlists without a general shell;
-independent configured checks run through easy-ref. Harnesses still need normal
-service authentication/networking. See the [verified adapter flags and versions](docs/adapter-verification.md).
+independent configured checks run through easy-ref. **Check commands run
+builder-written code without a sandbox, with the owner's permissions.** For
+example, `python -m unittest` executes whatever tests the builder wrote. Treat
+check commands as trusted configuration and the code they execute as untrusted.
+Harnesses still need normal service authentication/networking. See the [verified adapter flags and versions](docs/adapter-verification.md).
 There has been no real-model validation; tests use fake adapters/executables.
 
 ## Records and cleanup
@@ -138,8 +150,8 @@ versioned `run.json`, owner decisions, stop summary, and per-round/per-attempt
 prompts, logs, hand-backs, check results and verdicts. Resumed review attempts
 preserve earlier records. Logs may contain sensitive data and are never copied
 into tracked files automatically. If the target has `work-orders/`, required
-reviews generate portable fix orders there, which the builder is told to commit
-with its fix. Raw review logs remain private.
+reviews generate portable fix orders there, which easy-ref commits with the
+builder's fix. Raw review logs remain private.
 
 Every stop writes a summary with reason, rounds, branch, worktree location,
 check results, question, config changes, ignored paths, and any remote-ref movement.
@@ -168,5 +180,7 @@ is addressed by its designated fix commit. Historical work orders are records,
 not instructions to act on.
 
 Follow-ups: stronger OS/network isolation, semantic repeated-finding detection,
-and broader platform support. Parallel orders, publishing/PR/merge workflows,
+running checks inside the harness sandbox (for example through `codex sandbox`
+on macOS), giving shell-free reviewers read access to full diffs above the inline
+cap, and broader platform support. Parallel orders, publishing/PR/merge workflows,
 CI integration, a web UI, and cost/budget tracking are outside v1.

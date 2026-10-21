@@ -33,13 +33,11 @@ class Fake:
             raise action
         if callable(action):
             action = action(worktree, env)
-        if role == 'builder' and action == 'commit':
-            # Use actual subprocesses with the policy environment, no models.
+        if role == 'builder' and action == 'edit':
+            # Builders edit only; easy-ref must create the commit outside the harness.
             path = worktree / 'built'
             path.write_text(path.read_text() + 'x' if path.exists() else 'x')
-            execute(['git', 'add', '.'], worktree, run_dir / 'add.log', timeout, env, stopped)
-            execute(['git', 'commit', '-qm', 'fake build'], worktree, run_dir / 'commit.log', timeout, env, stopped)
-            action = 'Committed the change'
+            action = 'feat: update built\nBuilder hand-back details'
         log = run_dir / f'{role}.log'
         log.write_text(str(action))
         if isinstance(action, Result):
@@ -48,7 +46,7 @@ class Fake:
 
 
 class LoopTests(RepoTest):
-    def go(self, builders=('commit',), reviews=None, **config):
+    def go(self, builders=('edit',), reviews=None, **config):
         state = self.start(**config)
         self.builder = Fake(builders)
         self.reviewer = Fake(reviews if reviews is not None else [verdict()])
@@ -67,15 +65,15 @@ class LoopTests(RepoTest):
         (self.repo / 'work-orders' / 'seed.md').write_text('historical')
         git(self.repo, 'add', '.')
         git(self.repo, 'commit', '-qm', 'order directory')
-        state = self.go(['commit', 'commit'], [verdict('CHANGES_REQUIRED'), verdict()])
+        state = self.go(['edit', 'edit'], [verdict('CHANGES_REQUIRED'), verdict()])
         self.assertEqual(state['status'], 'DONE')
         self.assertIn('Fix the edge case', self.builder.prompts[1])
-        self.assertIn('Commit the fix order', self.builder.prompts[1])
+        self.assertIn('easy-ref will commit it with the fix', self.builder.prompts[1])
         self.assertIn('easy-ref-', git(state['worktree'], 'ls-tree', '-r', '--name-only', 'HEAD'))
 
     def test_failing_checks_feed_builder_skip_review(self):
         command = [sys.executable, '-c', "from pathlib import Path; import sys; print('check failure'); sys.exit(len(Path('built').read_text()) < 2)"]
-        state = self.go(['commit', 'commit'], checks=[command])
+        state = self.go(['edit', 'edit'], checks=[command])
         self.assertEqual(state['status'], 'DONE')
         self.assertEqual(len(self.reviewer.prompts), 1)
         self.assertIn('check failure', self.builder.prompts[1])
@@ -106,18 +104,18 @@ class LoopTests(RepoTest):
         with self.assertRaisesRegex(ValueError, 'failing checks'):
             decide({'checks': [{'exit_code': 1}]}, parse(verdict()))
 
-    def test_no_new_commit(self):
+    def test_no_changes(self):
         state = self.go(['No changes'])
         self.assertEqual(state['status'], 'NEEDS_OWNER')
-        self.assertIn('no new commit', state['reason'])
+        self.assertIn('no changes', state['reason'])
 
     def test_repeated_finding(self):
-        state = self.go(['commit', 'commit'], [verdict('CHANGES_REQUIRED')] * 2)
+        state = self.go(['edit', 'edit'], [verdict('CHANGES_REQUIRED')] * 2)
         self.assertIn('repeated', state['reason'])
         self.assertEqual(state['round'], 2)
 
     def test_round_limit(self):
-        state = self.go(['commit'], [verdict('CHANGES_REQUIRED')], round_limit=1)
+        state = self.go(['edit'], [verdict('CHANGES_REQUIRED')], round_limit=1)
         self.assertIn('round limit', state['reason'])
         self.assertEqual(state['round'], 1)
 
@@ -144,7 +142,7 @@ class LoopTests(RepoTest):
         self.assertIn('Use behavior A', self.reviewer.prompts[1])
 
     def test_answer_builder_resumes_build(self):
-        state = self.go([TimeoutError('timeout'), 'commit'])
+        state = self.go([TimeoutError('timeout'), 'edit'])
         answer(self.directory, 'Retry building')
         state = run(self.directory, self.builder, self.reviewer, notify=lambda _: None)
         self.assertEqual(state['status'], 'DONE')
@@ -163,7 +161,7 @@ class LoopTests(RepoTest):
     def test_remote_tracking_movement(self):
         def move(w, env):
             git(w, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
-            return 'commit'
+            return 'edit'
         state = self.go([move])
         self.assertEqual(state['status'], 'NEEDS_OWNER')
         self.assertIn('remote-tracking refs moved', state['reason'])
@@ -181,7 +179,7 @@ class LoopTests(RepoTest):
         (self.repo / 'easy-ref.toml').write_text('checks = ' + json.dumps([[sys.executable, '-c', code]]))
         def build(w, env):
             (w / 'easy-ref.toml').write_text('checks = []')
-            return 'commit'
+            return 'edit'
         state = self.go([build])
         self.assertEqual(state['status'], 'DONE')
         self.assertTrue(state['config_changed'])
@@ -236,7 +234,7 @@ class LoopTests(RepoTest):
         def build(w, env):
             (w / '.gitignore').write_text('ignored\n')
             (w / 'ignored').write_text('before')
-            return 'commit'
+            return 'edit'
         def review(w, env):
             (w / 'ignored').write_text('after')
             return verdict()
@@ -259,7 +257,7 @@ class LoopTests(RepoTest):
         outside.mkdir()
         def build(w, env):
             (w / 'work-orders').symlink_to(outside, target_is_directory=True)
-            return 'commit'
+            return 'edit'
         state = self.go([build], [verdict('CHANGES_REQUIRED')])
         self.assertEqual(state['status'], 'NEEDS_OWNER')
         self.assertEqual(list(outside.iterdir()), [])
@@ -267,7 +265,7 @@ class LoopTests(RepoTest):
     def test_stop_during_agent(self):
         def stop(w, env):
             request_stop(self.directory)
-            return 'commit'
+            return 'edit'
         state = self.go([stop])
         self.assertEqual(state['status'], 'STOPPED')
         self.assertEqual(len(self.reviewer.prompts), 0)
@@ -275,7 +273,7 @@ class LoopTests(RepoTest):
     def test_large_diff_is_capped(self):
         def build(w, env):
             (w / 'large').write_text('large payload\n' * 10000)
-            return 'commit'
+            return 'edit'
         state = self.go([build])
         self.assertEqual(state['status'], 'DONE')
         self.assertIn('Inspect the full diff locally', self.reviewer.prompts[0])
@@ -287,7 +285,7 @@ class LoopTests(RepoTest):
         self.assertIn('timed out', state['reason'])
 
     def test_failing_checks_exhaust_rounds(self):
-        state = self.go(['commit'], checks=[[sys.executable, '-c', 'raise SystemExit(1)']], round_limit=1)
+        state = self.go(['edit'], checks=[[sys.executable, '-c', 'raise SystemExit(1)']], round_limit=1)
         self.assertEqual(state['status'], 'NEEDS_OWNER')
         self.assertEqual(state['round'], 1)
         self.assertEqual(len(self.reviewer.prompts), 0)
@@ -309,7 +307,7 @@ class LoopTests(RepoTest):
     def test_agent_switching_branch_stops(self):
         def build(w, env):
             git(w, 'checkout', '-qb', 'unexpected')
-            return 'commit'
+            return 'edit'
         state = self.go([build])
         self.assertEqual(state['status'], 'NEEDS_OWNER')
         self.assertIn('branch identity changed', state['reason'])
@@ -329,38 +327,42 @@ class LoopTests(RepoTest):
         self.assertEqual(state['status'], 'NEEDS_OWNER')
         self.assertIn('reviewer exited 1', state['reason'])
 
-    def test_config_change_reported_on_no_commit_stop(self):
+    def test_config_change_reported_on_host_commit(self):
         def build(w, env):
             (w / 'easy-ref.toml').write_text('checks = []')
-            return 'No commit'
+            return 'Update configuration'
         state = self.go([build])
-        self.assertEqual(state['status'], 'NEEDS_OWNER')
+        self.assertEqual(state['status'], 'DONE')
         self.assertTrue(state['config_changed'])
         self.assertIn('Configuration changed: True', (Path(self.directory) / 'summary.txt').read_text())
 
-
-    def test_uncommitted_builder_work_retries_before_checks(self):
-        def dirty(w, env):
-            git(w, 'commit', '--allow-empty', '-qm', 'partial work')
-            (w / 'needed').write_text('not yet committed')
-            return 'done'
-        state = self.go([dirty, 'commit'], checks=[[sys.executable, '-c',
+    def test_uncommitted_builder_work_is_committed_before_checks(self):
+        def edit(w, env):
+            (w / 'needed').write_text('ready to commit')
+            return 'feat: add needed file\nDetailed hand-back'
+        state = self.go([edit], checks=[[sys.executable, '-c',
                          "from pathlib import Path; assert Path('needed').is_file()"]])
         self.assertEqual(state['status'], 'DONE')
-        self.assertEqual(state['round'], 2)
-        self.assertIn('needed', self.builder.prompts[1])
-        self.assertEqual(len(self.reviewer.prompts), 1)
-        self.assertEqual(git(state['worktree'], 'show', 'HEAD:needed'), 'not yet committed')
-        self.assertFalse((Path(self.directory) / 'rounds/001/attempt-001/checks.json').exists())
+        self.assertEqual(state['round'], 1)
+        self.assertEqual(git(state['worktree'], 'show', 'HEAD:needed'), 'ready to commit')
+        self.assertEqual(git(state['worktree'], 'log', '-1', '--format=%s'), 'feat: add needed file')
+        self.assertEqual(git(state['worktree'], 'status', '--porcelain'), '')
+        self.assertIn('Do not commit. easy-ref commits your changes.', self.builder.prompts[0])
 
-    def test_uncommitted_builder_work_exhausts_limit_without_approval(self):
-        def dirty(w, env):
-            git(w, 'commit', '--allow-empty', '-qm', 'partial work')
-            (w / 'needed').write_text('uncommitted')
-            return 'done'
-        state = self.go([dirty], round_limit=1)
-        self.assertEqual(state['status'], 'NEEDS_OWNER')
-        self.assertEqual(len(self.reviewer.prompts), 0)
+    def test_builder_commits_plus_leftover_changes_are_kept(self):
+        def partial(w, env):
+            (w / 'already-committed').write_text('first')
+            git(w, 'add', '.')
+            git(w, 'commit', '-qm', 'builder commit')
+            (w / 'leftover').write_text('second')
+            return 'feat: commit leftover changes'
+        state = self.go([partial])
+        self.assertEqual(state['status'], 'DONE')
+        self.assertEqual(git(state['worktree'], 'show', 'HEAD:already-committed'), 'first')
+        self.assertEqual(git(state['worktree'], 'show', 'HEAD:leftover'), 'second')
+        self.assertEqual(git(state['worktree'], 'rev-list', '--count', state['base'] + '..HEAD'), '2')
+        self.assertEqual(git(state['worktree'], 'log', '-2', '--format=%s').splitlines(),
+                         ['feat: commit leftover changes', 'builder commit'])
 
     def test_reviewer_python_cache_is_reported_and_allows_review(self):
         (self.repo / '.gitignore').write_text('__pycache__/\n')
@@ -370,7 +372,7 @@ class LoopTests(RepoTest):
         def review(w, env):
             subprocess.run([sys.executable, '-c', 'import module'], cwd=w, env=env, check=True)
             return verdict('CHANGES_REQUIRED')
-        state = self.go(['commit', 'commit'], [review, verdict()])
+        state = self.go(['edit', 'edit'], [review, verdict()])
         self.assertEqual(state['status'], 'DONE')
         self.assertTrue(any('__pycache__' in name for name in state['ignored_changes']))
         self.assertIn('__pycache__', self.builder.prompts[1])
@@ -410,3 +412,115 @@ class LoopTests(RepoTest):
         self.assertNotIn('/home/example', result)
         self.assertNotIn('~/private', result)
         self.assertNotIn('C:\\Users', result)
+
+
+    def test_long_subject_uses_fallback(self):
+        def edit(w, env):
+            (w / 'file').write_text('new')
+            return 'x' * 73 + '\nDetails'
+        state = self.go([edit])
+        self.assertEqual(state['status'], 'DONE')
+        self.assertEqual(git(state['worktree'], 'log', '-1', '--format=%s'), 'easy-ref: order round 1')
+
+    def test_empty_first_line_uses_fallback(self):
+        def edit(w, env):
+            (w / 'file').write_text('new')
+            return '\nDetails without a subject'
+        state = self.go([edit])
+        self.assertEqual(state['status'], 'DONE')
+        self.assertEqual(git(state['worktree'], 'log', '-1', '--format=%s'), 'easy-ref: order round 1')
+
+    def test_subject_validation(self):
+        from easy_ref.loop import commit_subject
+        state = {'handback': 'x' * 72 + '\nDetails', 'branch': 'ref/task', 'round': 2}
+        self.assertEqual(commit_subject(state), 'x' * 72)
+        for message in ('bad\rsubject', 'bad\x00subject', '   \nDetails', 'x' * 73):
+            state['handback'] = message
+            self.assertEqual(commit_subject(state), 'easy-ref: task round 2')
+
+    def test_builder_written_tracked_hooks_never_run(self):
+        git(self.repo, 'config', 'core.hooksPath', '.hooks')
+        def edit(w, env):
+            hooks = w / '.hooks'
+            hooks.mkdir()
+            for name in ('pre-commit', 'prepare-commit-msg', 'commit-msg', 'post-commit', 'post-index-change'):
+                path = hooks / name
+                path.write_text('#!/bin/sh\nprintf invoked > hook-ran\nexit 1\n')
+                path.chmod(0o755)
+            return 'feat: add tracked hook fixtures'
+        state = self.go([edit])
+        self.assertEqual(state['status'], 'DONE')
+        self.assertFalse((Path(state['worktree']) / 'hook-ran').exists())
+        self.assertIn('.hooks/pre-commit', git(state['worktree'], 'ls-tree', '-r', '--name-only', 'HEAD'))
+        self.assertEqual(git(self.repo, 'config', '--local', '--get', 'core.hooksPath'), '.hooks')
+
+    def test_ignored_only_builder_changes_stop_without_commit(self):
+        (self.repo / '.gitignore').write_text('ignored\n')
+        git(self.repo, 'add', '.')
+        git(self.repo, 'commit', '-qm', 'ignore cache')
+        def edit(w, env):
+            (w / 'ignored').write_text('cache')
+            return 'Only generated cache'
+        state = self.go([edit])
+        self.assertEqual(state['status'], 'NEEDS_OWNER')
+        self.assertIn('no changes', state['reason'])
+        self.assertEqual(len(self.reviewer.prompts), 0)
+
+    def test_builder_rewind_is_refused_before_host_commit(self):
+        def rewind(w, env):
+            git(w, 'reset', '--hard', 'HEAD~1')
+            (w / 'leftover').write_text('should not be committed')
+            return 'Try rewriting history'
+        state = self.go(['edit', rewind], [verdict('CHANGES_REQUIRED')])
+        self.assertEqual(state['status'], 'NEEDS_OWNER')
+        self.assertEqual(len(self.reviewer.prompts), 1)
+        self.assertNotIn('leftover', git(state['worktree'], 'ls-tree', '-r', '--name-only', 'HEAD'))
+
+
+    def test_existing_builder_commit_without_leftovers_is_kept(self):
+        def build(w, env):
+            (w / 'file').write_text('already committed')
+            git(w, 'add', '.')
+            git(w, 'commit', '-qm', 'builder subject')
+            return 'No additional host commit needed'
+        state = self.go([build])
+        self.assertEqual(state['status'], 'DONE')
+        self.assertEqual(git(state['worktree'], 'log', '-1', '--format=%s'), 'builder subject')
+        self.assertEqual(git(state['worktree'], 'rev-list', '--count', state['base'] + '..HEAD'), '1')
+
+    def test_host_commit_failure_stops_before_checks_and_review(self):
+        def build(w, env):
+            git(w, 'config', 'user.name', '')
+            (w / 'file').write_text('uncommitted')
+            return 'Commit requires a valid Git identity'
+        state = self.go([build], checks=[[sys.executable, '-c', 'raise AssertionError("must not run")']])
+        self.assertEqual(state['status'], 'NEEDS_OWNER')
+        self.assertIn('could not commit builder changes', state['reason'])
+        self.assertEqual(state['checks'], [])
+        self.assertEqual(len(self.reviewer.prompts), 0)
+        self.assertEqual(git(state['worktree'], 'rev-parse', 'HEAD'), state['base'])
+
+    def test_host_commit_includes_deletions_and_excludes_ignored_files(self):
+        (self.repo / '.gitignore').write_text('ignored\n')
+        git(self.repo, 'add', '.')
+        git(self.repo, 'commit', '-qm', 'ignore generated file')
+        def build(w, env):
+            (w / 'seed').unlink()
+            (w / 'replacement').write_text('new')
+            (w / 'ignored').write_text('cache')
+            return 'Replace the seed'
+        state = self.go([build])
+        self.assertEqual(state['status'], 'DONE')
+        names = git(state['worktree'], 'ls-tree', '-r', '--name-only', 'HEAD').splitlines()
+        self.assertIn('replacement', names)
+        self.assertNotIn('seed', names)
+        self.assertNotIn('ignored', names)
+        self.assertEqual(git(state['worktree'], 'status', '--porcelain'), '')
+
+    def test_interrupted_host_commit_requires_owner(self):
+        state = self.start()
+        state['phase'] = 'committing'
+        save(state)
+        state = run(state['run_dir'], Fake([]), Fake([]), notify=lambda _: None)
+        self.assertEqual(state['status'], 'NEEDS_OWNER')
+        self.assertIn('interrupted operation', state['reason'])
