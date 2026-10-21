@@ -17,7 +17,7 @@ class Adapter(Harness):
         source = run_dir / f'{role}-input.txt'
         source.write_text(prompt)
         args = [self.executable, '--print', '--output-format', 'json', '--restricted', '--safe-mode',
-                '--strict-mcp-config', '--mcp-config', '{}', '--no-session-persistence',
+                '--strict-mcp-config', '--mcp-config', json.dumps({'mcpServers': {}}), '--no-session-persistence',
                 '--permission-prompts', 'none', *self.model_args()]
         if role == 'builder':
             settings = {'sandbox': {'enabled': True, 'failIfUnavailable': True,

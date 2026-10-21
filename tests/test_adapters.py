@@ -140,3 +140,12 @@ class AdapterTests(RepoTest):
     def test_unknown_adapter_rejected(self):
         with self.assertRaisesRegex(ValueError, 'unknown adapter'):
             build({'builder': 'unknown'}, 'builder')
+
+
+    def test_claude_empty_mcp_config_includes_server_map(self):
+        for role in ('builder', 'reviewer'):
+            with self.subTest(role=role):
+                result, call = self.invoke(self.adapter('claude'), role)
+                self.assertEqual(result.exit_code, 0)
+                value = call['args'][call['args'].index('--mcp-config') + 1]
+                self.assertEqual(value, json.dumps({'mcpServers': {}}))
