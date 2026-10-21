@@ -50,7 +50,7 @@ def refs(repo):
 
 
 def fingerprint(repo):
-    names = subprocess.check_output(['git', '-C', str(repo), 'ls-files', '-z', '--cached', '--others']).split(b'\0')
+    names = subprocess.check_output(['git', '-C', str(repo), 'ls-files', '-z', '--cached', '--others', '--exclude-standard']).split(b'\0')
     digest = hashlib.sha256()
     for name in sorted(set(names) - {b''}):
         path = Path(repo) / os.fsdecode(name)
@@ -138,3 +138,20 @@ def _create(repo, order, overrides=None):
         save(state)
         raise
     return state
+
+
+def ignored_fingerprint(repo):
+    """Ignored files are reported separately, never counted as review mutations."""
+    names = subprocess.check_output(['git', '-C', str(repo), 'ls-files', '-z',
+                                     '--others', '--ignored', '--exclude-standard']).split(b'\0')
+    result = {}
+    for name in set(names) - {b''}:
+        path = Path(repo) / os.fsdecode(name)
+        if path.is_symlink():
+            value = os.fsencode(os.readlink(path))
+        elif path.is_file():
+            value = path.read_bytes()
+        else:
+            value = b'missing'
+        result[os.fsdecode(name)] = hashlib.sha256(value).hexdigest()
+    return result

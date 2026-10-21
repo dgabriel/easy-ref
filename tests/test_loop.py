@@ -88,7 +88,6 @@ class LoopTests(RepoTest):
     def test_reviewer_modifies_dirty_file(self):
         def build(w, env):
             git(w, 'commit', '--allow-empty', '-qm', 'fake')
-            (w / 'seed').write_text('dirty before')
             return 'hand-back'
         def review(w, env):
             (w / 'seed').write_text('dirty after')
@@ -241,7 +240,9 @@ class LoopTests(RepoTest):
         def review(w, env):
             (w / 'ignored').write_text('after')
             return verdict()
-        self.assertIn('reviewer changed', self.go([build], [review])['reason'])
+        state = self.go([build], [review])
+        self.assertEqual(state['status'], 'DONE')
+        self.assertIn('ignored', state['ignored_changes'])
 
     def test_review_resume_preserves_previous_artifacts(self):
         self.go(reviews=[verdict('NEEDS_OWNER'), verdict()])
@@ -336,3 +337,66 @@ class LoopTests(RepoTest):
         self.assertEqual(state['status'], 'NEEDS_OWNER')
         self.assertTrue(state['config_changed'])
         self.assertIn('Configuration changed: True', (Path(self.directory) / 'summary.txt').read_text())
+
+
+    def test_uncommitted_builder_work_retries_before_checks(self):
+        def dirty(w, env):
+            git(w, 'commit', '--allow-empty', '-qm', 'partial work')
+            (w / 'needed').write_text('not yet committed')
+            return 'done'
+        state = self.go([dirty, 'commit'], checks=[[sys.executable, '-c',
+                         "from pathlib import Path; assert Path('needed').is_file()"]])
+        self.assertEqual(state['status'], 'DONE')
+        self.assertEqual(state['round'], 2)
+        self.assertIn('needed', self.builder.prompts[1])
+        self.assertEqual(len(self.reviewer.prompts), 1)
+        self.assertEqual(git(state['worktree'], 'show', 'HEAD:needed'), 'not yet committed')
+        self.assertFalse((Path(self.directory) / 'rounds/001/attempt-001/checks.json').exists())
+
+    def test_uncommitted_builder_work_exhausts_limit_without_approval(self):
+        def dirty(w, env):
+            git(w, 'commit', '--allow-empty', '-qm', 'partial work')
+            (w / 'needed').write_text('uncommitted')
+            return 'done'
+        state = self.go([dirty], round_limit=1)
+        self.assertEqual(state['status'], 'NEEDS_OWNER')
+        self.assertEqual(len(self.reviewer.prompts), 0)
+
+    def test_reviewer_python_cache_is_reported_and_allows_review(self):
+        (self.repo / '.gitignore').write_text('__pycache__/\n')
+        (self.repo / 'module.py').write_text('value = 1\n')
+        git(self.repo, 'add', '.')
+        git(self.repo, 'commit', '-qm', 'module')
+        def review(w, env):
+            subprocess.run([sys.executable, '-c', 'import module'], cwd=w, env=env, check=True)
+            return verdict('CHANGES_REQUIRED')
+        state = self.go(['commit', 'commit'], [review, verdict()])
+        self.assertEqual(state['status'], 'DONE')
+        self.assertTrue(any('__pycache__' in name for name in state['ignored_changes']))
+        self.assertIn('__pycache__', self.builder.prompts[1])
+        self.assertIn('__pycache__', (Path(self.directory) / 'summary.txt').read_text())
+
+    def test_reviewer_nonignored_untracked_edit_stops(self):
+        def review(w, env):
+            (w / 'unexpected').write_text('new')
+            return verdict()
+        state = self.go(reviews=[review])
+        self.assertEqual(state['status'], 'NEEDS_OWNER')
+        self.assertIn('reviewer changed', state['reason'])
+
+    def test_process_stdin_is_closed_by_default(self):
+        path = self.root / 'stdin.log'
+        code = execute([sys.executable, '-c', "import sys; print(repr(sys.stdin.read()))"],
+                       self.repo, path, 2, {})
+        self.assertEqual(code, 0)
+        self.assertEqual(path.read_text().strip(), "''")
+
+    def test_process_stdin_explicit_opt_in(self):
+        path = self.root / 'stdin.log'
+        source = self.root / 'input.txt'
+        source.write_text('prompt')
+        with source.open('rb') as handle:
+            code = execute([sys.executable, '-c', 'import sys; print(sys.stdin.read())'],
+                           self.repo, path, 2, {}, stdin=handle)
+        self.assertEqual(code, 0)
+        self.assertEqual(path.read_text().strip(), 'prompt')

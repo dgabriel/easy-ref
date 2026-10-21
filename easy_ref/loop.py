@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import shlex
 
-from .core import fingerprint, git, load, push_env, refs, save
+from .core import ignored_fingerprint, fingerprint, git, load, push_env, refs, save
 from .process import execute
 from .verdict import parse
 
@@ -40,6 +40,7 @@ def finish(state, reason, status='NEEDS_OWNER', question='', origin='builder', n
             f"Checks: {json.dumps(state['checks'])}\nQuestion: {question}\n"
             f"Configuration changed: {state.get('config_changed', False)}\n"
             f"Warning: {state.get('warning', '')}\n"
+            f"Ignored paths changed during review: {state.get('ignored_changes', [])}\n"
             f"Remote ref movement: {state.get('remote_movement', '')}\n"
             'Publishing guardrails are best-effort, not isolation.\n')
     (Path(state['run_dir']) / 'summary.txt').write_text(text)
@@ -141,6 +142,7 @@ def fix_order(state, verdict):
 def prompt(state, role):
     order = (Path(state['run_dir']) / 'order.md').read_text()
     common = (order + '\n\nNever push, open pull requests, merge, deploy, or delete branches.\n'
+              + 'Ignored paths changed during prior reviews: ' + json.dumps(state.get('ignored_changes', [])) + '\n'
               + 'Owner decisions:\n' + '\n'.join(state['decisions']))
     if role == 'builder':
         return (common + '\nRequired fixes:\n' + state.get('feedback', '') +
@@ -207,6 +209,14 @@ def run(directory, builder, reviewer, notify=print):
                     if before == after:
                         raise ValueError('builder made no new commit')
                     git(state['worktree'], 'merge-base', '--is-ancestor', before, after)
+                    dirty = git(state['worktree'], 'status', '--porcelain=v1', '--untracked-files=all')
+                    if dirty:
+                        state['checks'] = []
+                        state['feedback'] = 'Commit or remove all uncommitted paths before checks/review:\n' + dirty
+                        (rd / 'uncommitted.txt').write_text(dirty + '\n')
+                        state['phase'] = 'build'
+                        save(state)
+                        continue
                     check(state, rd)
                 else:
                     # Answers to reviewer questions require fresh checks and identity validation.
@@ -219,7 +229,15 @@ def run(directory, builder, reviewer, notify=print):
                     save(state)
                     continue
                 snapshot = fingerprint(state['worktree'])
-                message = call(state, rd, 'reviewer', reviewer)
+                ignored_before = ignored_fingerprint(state['worktree'])
+                try:
+                    message = call(state, rd, 'reviewer', reviewer)
+                finally:
+                    ignored_after = ignored_fingerprint(state['worktree'])
+                    changed = {name for name in ignored_before.keys() | ignored_after.keys()
+                               if ignored_before.get(name) != ignored_after.get(name)}
+                    state['ignored_changes'] = sorted(set(state.get('ignored_changes', [])) | changed)
+                    save(state)
                 if fingerprint(state['worktree']) != snapshot:
                     raise ValueError('reviewer changed worktree or HEAD')
                 verdict = parse(message)

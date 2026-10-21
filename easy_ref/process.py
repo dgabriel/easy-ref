@@ -14,10 +14,10 @@ class Result:
     log_path: str
 
 
-def execute(argv, cwd, log_path, timeout, env, stopped=lambda: False):
+def execute(argv, cwd, log_path, timeout, env, stopped=lambda: False, *, stdin=subprocess.DEVNULL):
     """No shell; terminate the process group on timeout, stop, or interruption."""
     with Path(log_path).open('wb') as output:
-        process = subprocess.Popen(argv, cwd=cwd, env=env, stdout=output,
+        process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=stdin, stdout=output,
                                    stderr=subprocess.STDOUT, start_new_session=True)
         try:
             deadline = time.monotonic() + timeout
