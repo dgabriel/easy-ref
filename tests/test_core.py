@@ -55,3 +55,32 @@ class CoreTests(RepoTest):
         env = push_env(self.repo)
         result = subprocess.check_output(['git', 'config', '--get', 'remote.origin.pushurl'], env=env, text=True)
         self.assertEqual(result.strip(), 'invalid://easy-ref-disabled')
+
+    def test_push_environment_resets_all_existing_pushurls(self):
+        git(self.repo, 'remote', 'add', 'origin', 'https://example.invalid/fetch')
+        git(self.repo, 'config', '--add', 'remote.origin.pushurl', 'https://example.invalid/one')
+        git(self.repo, 'config', '--add', 'remote.origin.pushurl', 'https://example.invalid/two')
+        before = git(self.repo, 'config', '--get-all', 'remote.origin.pushurl')
+        output = subprocess.check_output(['git', '-C', str(self.repo), 'remote', 'get-url', '--push', '--all', 'origin'], env=push_env(self.repo), text=True)
+        self.assertEqual(output.strip(), 'invalid://easy-ref-disabled')
+        self.assertEqual(before, git(self.repo, 'config', '--get-all', 'remote.origin.pushurl'))
+
+    def test_second_unfinished_run_refused(self):
+        self.start()
+        other = self.root / 'other.md'
+        other.write_text('Other task')
+        with self.assertRaisesRegex(ValueError, 'unfinished'):
+            create(self.repo, other)
+
+    def test_invalid_configuration(self):
+        for config in ({'checks': ['shell command']}, {'timeout': float('nan')}, {'round_limit': True}):
+            with self.subTest(config=config), self.assertRaises(ValueError):
+                self.start(**config)
+
+    def test_configurable_external_worktree(self):
+        state = self.start(worktree_root='../custom-agents')
+        self.assertEqual(Path(state['worktree']).parent, (self.root / 'custom-agents').resolve())
+
+    def test_external_git_directory_refused(self):
+        with self.assertRaises(ValueError):
+            self.start(worktree_root=str(self.root / 'other' / '.git' / 'agents'))
