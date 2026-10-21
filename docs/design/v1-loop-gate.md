@@ -1,4 +1,8 @@
-# Implementation gate: commits 1 and 2
+# Historical implementation gate: commits 1 and 2
+
+This records the earlier checkpoint. Its pending work and ignored-file behavior
+were superseded by the [checkpoint review](../../work-orders/2026-10-21-v1-loop-checkpoint-review.md)
+and subsequent implementation. See [current usage and limits](../../README.md).
 
 The design was approved with the amendments in the design review. The design
 and review were committed before implementation. The v1 work order remains open.
