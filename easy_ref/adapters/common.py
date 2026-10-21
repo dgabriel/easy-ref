@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import subprocess
+import shutil
 
 from ..verdict import unique
 
@@ -54,6 +55,10 @@ class Harness:
         self.allow_unsandboxed = allow_unsandboxed
 
     def verify(self):
+        executable = shutil.which(self.executable)
+        if executable is None:
+            raise ValueError(f'{self.executable}: executable not found')
+        self.executable = str(Path(executable).resolve())
         return probe(self.executable, self.help_args, self.flags)
 
     def model_args(self):

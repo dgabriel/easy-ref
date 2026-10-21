@@ -11,13 +11,17 @@ from .process import execute
 from .verdict import parse
 
 
+class RunBusy(ValueError):
+    """An active worker holds the run mutation lock."""
+
+
 @contextmanager
 def locked(directory):
     with (Path(directory) / 'lock').open('a') as handle:
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise ValueError('run is already active') from None
+            raise RunBusy('run is already active') from None
         yield
 
 
@@ -25,8 +29,27 @@ def stop_requested(state):
     return (Path(state['run_dir']) / 'stop-request').exists()
 
 
-def request_stop(directory):
+def request_stop(directory, notify=print):
     (Path(directory) / 'stop-request').touch()
+    try:
+        with locked(directory):
+            state = load(directory)
+            if state['status'] in ('DONE', 'STOPPED'):
+                return state
+            return finish(state, 'owner requested stop', 'STOPPED', notify=notify)
+    except RunBusy:
+        return load(directory)
+
+
+def status(directory, notify=print):
+    try:
+        with locked(directory):
+            state = load(directory)
+            if state['status'] == 'RUNNING':
+                return finish(state, 'no active worker; interrupted run requires owner inspection', notify=notify)
+            return state
+    except RunBusy:
+        return load(directory)
 
 
 def finish(state, reason, status='NEEDS_OWNER', question='', origin='builder', notify=print):
@@ -40,6 +63,7 @@ def finish(state, reason, status='NEEDS_OWNER', question='', origin='builder', n
             f"Checks: {json.dumps(state['checks'])}\nQuestion: {question}\n"
             f"Configuration changed: {state.get('config_changed', False)}\n"
             f"Warning: {state.get('warning', '')}\n"
+            f"Unsandboxed adapters (Pi): {state.get('unsandboxed', [])}\n"
             f"Ignored paths changed during review: {state.get('ignored_changes', [])}\n"
             f"Remote ref movement: {state.get('remote_movement', '')}\n"
             'Publishing guardrails are best-effort, not isolation.\n')
@@ -91,7 +115,7 @@ def check(state, directory):
         path = directory / f'check-{index + 1}.log'
         try:
             code = guarded(state, lambda env: execute(command, state['worktree'], path,
-                           state['config']['timeout'], env, lambda: stop_requested(state)))
+                           state['config'].get('check_timeout', state['config']['timeout']), env, lambda: stop_requested(state)))
         except Exception as exc:
             state['checks'].append({'command': command, 'exit_code': None,
                                     'error': str(exc), 'output': path.read_text(errors='replace') if path.exists() else ''})
@@ -143,6 +167,7 @@ def prompt(state, role):
     order = (Path(state['run_dir']) / 'order.md').read_text()
     common = (order + '\n\nNever push, open pull requests, merge, deploy, or delete branches.\n'
               + 'Ignored paths changed during prior reviews: ' + json.dumps(state.get('ignored_changes', [])) + '\n'
+              + 'Unsandboxed adapters (Pi): ' + json.dumps(state.get('unsandboxed', [])) + '\n'
               + 'Owner decisions:\n' + '\n'.join(state['decisions']))
     if role == 'builder':
         return (common + '\nRequired fixes:\n' + state.get('feedback', '') +
@@ -165,7 +190,7 @@ def call(state, directory, role, adapter):
     state['phase'] = role + '-inflight'
     save(state)
     result = guarded(state, lambda env: adapter.invoke(
-        role, message, Path(state['worktree']), directory, state['config']['timeout'],
+        role, message, Path(state['worktree']), directory, state['config'].get(role + '_timeout', state['config']['timeout']),
         env=env, stopped=lambda: stop_requested(state)))
     if type(result.exit_code) is not int or result.exit_code != 0:
         raise ValueError(f'{role} exited {result.exit_code}')
@@ -178,12 +203,15 @@ def call(state, directory, role, adapter):
     return result.final_message
 
 
-def run(directory, builder, reviewer, notify=print):
+def run(directory, builder, reviewer, notify=print, prepare=None):
     with locked(directory):
         state = load(directory)
         if state['status'] in ('DONE', 'STOPPED', 'NEEDS_OWNER'):
             return state
         try:
+            if prepare is not None:
+                prepare(state, builder, reviewer)
+                save(state)
             if state['phase'] not in ('build', 'review'):
                 raise ValueError('interrupted operation; owner must inspect before resuming')
             identity(state)

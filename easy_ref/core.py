@@ -2,12 +2,12 @@
 import fcntl
 import hashlib
 import json
-import math
 import os
 from pathlib import Path
 import subprocess
-import tomllib
 import uuid
+
+from .config import resolve
 
 
 def git(repo, *args):
@@ -82,19 +82,7 @@ def create(repo, order, overrides=None):
 def _create(repo, order, overrides=None):
     repo = Path(git(repo, 'rev-parse', '--show-toplevel')).resolve()
     gd = Path(git(repo, 'rev-parse', '--absolute-git-dir')).resolve()
-    config = {'builder': 'codex', 'reviewer': 'claude', 'checks': [], 'round_limit': 3,
-              'timeout': 1800, 'notifier': 'terminal'}
-    cp = repo / 'easy-ref.toml'
-    config_text = cp.read_text() if cp.exists() else None
-    if config_text is not None:
-        config.update(tomllib.loads(config_text))
-    config.update(overrides or {})
-    if type(config['round_limit']) is not int or config['round_limit'] < 1:
-        raise ValueError('round_limit must be positive')
-    if type(config['timeout']) not in (int, float) or not math.isfinite(config['timeout']) or config['timeout'] <= 0:
-        raise ValueError('timeout must be positive')
-    if not isinstance(config['checks'], list) or any(not isinstance(c, list) or not c or any(not isinstance(a, str) for a in c) for c in config['checks']):
-        raise ValueError('checks must be nonempty argument arrays')
+    config, config_text = resolve(repo, overrides)
     slug = Path(order).stem
     branch = 'ref/' + slug
     git(repo, 'check-ref-format', '--branch', branch)
@@ -122,12 +110,14 @@ def _create(repo, order, overrides=None):
         raise ValueError('worktree must be outside common git directory')
     base = git(repo, 'rev-parse', 'HEAD')
     run_dir = runs / run_id
-    run_dir.mkdir(parents=True)
+    run_dir.mkdir(parents=True, mode=0o700)
     (run_dir / 'order.md').write_text(order_text)
     state = dict(version=1, run_id=run_id, repo=str(repo), run_dir=str(run_dir), worktree=str(worktree),
                  branch=branch, base=base, config=config, round=0, phase='create', status='RUNNING',
                  checks=[], required=[], decisions=[], reason='', question='', question_origin='',
-                 config_original=config_text)
+                 config_original=config_text,
+                 unsandboxed=[role for role in ('builder', 'reviewer') if config[role] == 'pi'],
+                 warning='' if config['checks'] else 'No checks configured; nothing independent was verified.')
     save(state)
     try:
         git(repo, 'worktree', 'add', '-b', branch, str(worktree), base)

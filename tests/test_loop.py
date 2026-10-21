@@ -202,7 +202,7 @@ class LoopTests(RepoTest):
 
     def test_stop_request(self):
         state = self.start()
-        request_stop(state['run_dir'])
+        request_stop(state['run_dir'], notify=lambda _: None)
         state = run(state['run_dir'], Fake([]), Fake([]), notify=lambda _: None)
         self.assertEqual(state['status'], 'STOPPED')
 
