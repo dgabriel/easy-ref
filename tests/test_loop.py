@@ -400,3 +400,13 @@ class LoopTests(RepoTest):
                            self.repo, path, 2, {}, stdin=handle)
         self.assertEqual(code, 0)
         self.assertEqual(path.read_text().strip(), 'prompt')
+
+    def test_fix_order_keeps_relative_paths_redacts_absolute_and_home(self):
+        from easy_ref.loop import portable
+        message = 'Fix src/app/range.py and ./src/app.py; omit /home/example/secret and ~/private and C:\\Users\\example\\secret'
+        result = portable(message, {})
+        self.assertIn('src/app/range.py', result)
+        self.assertIn('./src/app.py', result)
+        self.assertNotIn('/home/example', result)
+        self.assertNotIn('~/private', result)
+        self.assertNotIn('C:\\Users', result)

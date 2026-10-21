@@ -116,7 +116,7 @@ def decide(state, verdict):
 
 def portable(text, state):
     # Fix orders are tracked: omit evidence and redact path-like/secret text.
-    text = re.sub(r'(?:/[^\s]+|[A-Za-z]:\\[^\s]+)', '[path omitted]', text)
+    text = re.sub(r'(?<![\w./])(?:~[/\\][^\s]+|/[^\s]+|[A-Za-z]:[/\\][^\s]+)', '[path omitted]', text)
     text = re.sub(r'(?i)(token|password|secret|session[_ -]?id)\s*[:=]\s*\S+', '[sensitive value omitted]', text)
     return text
 

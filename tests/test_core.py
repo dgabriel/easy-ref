@@ -84,3 +84,15 @@ class CoreTests(RepoTest):
     def test_external_git_directory_refused(self):
         with self.assertRaises(ValueError):
             self.start(worktree_root=str(self.root / 'other' / '.git' / 'agents'))
+
+    def test_push_block_against_local_bare_remote(self):
+        # Explicitly requested checkpoint test: isolated local bare repo only.
+        bare = self.root / 'remote.git'
+        subprocess.run(['git', 'init', '--bare', '-q', str(bare)], check=True)
+        git(self.repo, 'remote', 'add', 'origin', str(bare))
+        before = git(bare, 'for-each-ref')
+        result = subprocess.run(['git', '-C', str(self.repo), 'push', 'origin', 'HEAD:refs/heads/test'],
+                                env=push_env(self.repo), capture_output=True, text=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('invalid', result.stderr)
+        self.assertEqual(git(bare, 'for-each-ref'), before)

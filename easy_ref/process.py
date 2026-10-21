@@ -1,4 +1,5 @@
 """Bounded subprocess execution shared by checks and future adapters."""
+from contextlib import ExitStack
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -14,11 +15,13 @@ class Result:
     log_path: str
 
 
-def execute(argv, cwd, log_path, timeout, env, stopped=lambda: False, *, stdin=subprocess.DEVNULL):
+def execute(argv, cwd, log_path, timeout, env, stopped=lambda: False, *, stdin=subprocess.DEVNULL, stdout_path=None):
     """No shell; terminate the process group on timeout, stop, or interruption."""
-    with Path(log_path).open('wb') as output:
-        process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=stdin, stdout=output,
-                                   stderr=subprocess.STDOUT, start_new_session=True)
+    with ExitStack() as stack:
+        output = stack.enter_context(Path(log_path).open('wb'))
+        stdout = stack.enter_context(Path(stdout_path).open('wb')) if stdout_path else output
+        process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=stdin, stdout=stdout,
+                                   stderr=output if stdout_path else subprocess.STDOUT, start_new_session=True)
         try:
             deadline = time.monotonic() + timeout
             while process.poll() is None:
