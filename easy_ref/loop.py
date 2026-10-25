@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import re
 import shlex
+import subprocess
 
 from .core import ignored_fingerprint, fingerprint, git, load, push_env, refs, save
 from .process import execute
@@ -163,7 +164,7 @@ def fix_order(state, verdict):
     state['fix_order'] = 'work-orders/' + name
 
 
-def prompt(state, role):
+def prompt(state, role, directory):
     order = (Path(state['run_dir']) / 'order.md').read_text()
     common = (order + '\n\nNever push, open pull requests, merge, deploy, or delete branches.\n'
               + 'Ignored paths changed during prior reviews: ' + json.dumps(state.get('ignored_changes', [])) + '\n'
@@ -174,9 +175,17 @@ def prompt(state, role):
                 '\nDo not commit. easy-ref commits your changes. Start your hand-back with a one-line commit subject, 72 characters or fewer.\n' +
                 ('Keep this fix order with your edits; easy-ref will commit it with the fix: ' + state['fix_order'] if state.get('fix_order') else ''))
     head = git(state['worktree'], 'rev-parse', 'HEAD')
-    diff = git(state['worktree'], 'diff', state['base'], '--')
-    if len(diff.encode()) > 64000:
-        diff = git(state['worktree'], 'diff', '--stat', state['base'], '--') + '\nInspect the full diff locally.'
+    full_diff = subprocess.check_output(
+        ['git', '-C', state['worktree'], '-c', 'core.hooksPath=/dev/null',
+         'diff', '--binary', state['base'], '--'], stderr=subprocess.PIPE)
+    diff_path = (directory / 'full.diff').resolve()
+    diff_path.write_bytes(full_diff)
+    # Pi's read tool and Codex's read-only sandbox already allow this path.
+    if len(full_diff) > 64000:
+        diff = (git(state['worktree'], 'diff', '--stat', state['base'], '--')
+                + f'\nRead the full diff at: {diff_path}')
+    else:
+        diff = full_diff.decode(errors='replace').strip()
     return (common + f"\nBase: {state['base']}\nHEAD: {head}\nDiff:\n{diff}\n"
             + '\nWorking-tree status:\n' + git(state['worktree'], 'status', '--porcelain=v1', '--untracked-files=all') + '\nInspect untracked files locally.\n' + '\nHand-back:\n' + state.get('handback', '') + '\nChecks:\n' + json.dumps(state['checks'])
             + f"\nConfiguration changed: {state.get('config_changed', False)}\n"
@@ -185,7 +194,7 @@ def prompt(state, role):
 
 
 def call(state, directory, role, adapter):
-    message = prompt(state, role)
+    message = prompt(state, role, directory)
     (directory / f'{role}-prompt.txt').write_text(message)
     state['phase'] = role + '-inflight'
     save(state)

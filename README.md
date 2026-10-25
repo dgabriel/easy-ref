@@ -179,8 +179,12 @@ review. The [checkpoint review](work-orders/2026-10-21-v1-loop-checkpoint-review
 is addressed by its designated fix commit. Historical work orders are records,
 not instructions to act on.
 
+Every review saves the complete binary-capable patch as `full.diff` in its private
+round attempt directory. Diffs up to 64 KB are inlined; larger diffs are supplied
+as an absolute file path alongside a stat summary. Shell-free reviewers can read
+the file; Claude receives read access to that attempt directory.
+
 Follow-ups: stronger OS/network isolation, semantic repeated-finding detection,
 running checks inside the harness sandbox (for example through `codex sandbox`
-on macOS), giving shell-free reviewers read access to full diffs above the inline
-cap, and broader platform support. Parallel orders, publishing/PR/merge workflows,
+on macOS), and broader platform support. Parallel orders, publishing/PR/merge workflows,
 CI integration, a web UI, and cost/budget tracking are outside v1.
