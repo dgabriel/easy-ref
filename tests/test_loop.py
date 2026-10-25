@@ -270,13 +270,38 @@ class LoopTests(RepoTest):
         self.assertEqual(state['status'], 'STOPPED')
         self.assertEqual(len(self.reviewer.prompts), 0)
 
+    def assert_full_diff(self, worktree):
+        state = load(self.directory)
+        path = Path(self.directory) / 'rounds/001/attempt-001/full.diff'
+        expected = subprocess.check_output(
+            ['git', '-C', str(worktree), 'diff', '--binary', state['base'], '--'])
+        self.assertEqual(path.read_bytes(), expected)
+        return path
+
+    def test_small_diff_is_saved_and_inlined(self):
+        def build(w, env):
+            (w / 'binary').write_bytes(b'\x00\x01\x02')
+            return 'edit'
+        def review(w, env):
+            path = self.assert_full_diff(w)
+            self.assertIn('GIT binary patch', path.read_text())
+            self.assertIn(path.read_text().strip(), self.reviewer.prompts[0])
+            return verdict()
+        state = self.go([build], [review])
+        self.assertEqual(state['status'], 'DONE', state['reason'])
+
     def test_large_diff_is_capped(self):
         def build(w, env):
             (w / 'large').write_text('large payload\n' * 10000)
             return 'edit'
-        state = self.go([build])
-        self.assertEqual(state['status'], 'DONE')
-        self.assertIn('Inspect the full diff locally', self.reviewer.prompts[0])
+        def review(w, env):
+            path = self.assert_full_diff(w)
+            self.assertGreater(path.stat().st_size, 64000)
+            self.assertIn(f'Read the full diff at: {path.resolve()}', self.reviewer.prompts[0])
+            self.assertIn('10000', self.reviewer.prompts[0])
+            return verdict()
+        state = self.go([build], [review])
+        self.assertEqual(state['status'], 'DONE', state['reason'])
         self.assertLess(len(self.reviewer.prompts[0]), 5000)
 
     def test_check_timeout(self):

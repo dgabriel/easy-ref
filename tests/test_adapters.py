@@ -95,6 +95,7 @@ class AdapterTests(RepoTest):
         self.assertEqual(call['args'][call['args'].index('--tools') + 1], 'Read,Grep,Glob')
         self.assertIn('Edit,Write,NotebookEdit,Bash,Agent,Task', call['args'])
         self.assertIn('manual', call['args'])
+        self.assertEqual(call['args'][call['args'].index('--add-dir') + 1], str(self.logs.resolve()))
         self.assertEqual(call['stdin'], 'work order prompt')
         self.assertIn('diagnostic on stderr', Path(result.log_path).read_text())
 
@@ -107,6 +108,7 @@ class AdapterTests(RepoTest):
         self.assertFalse(settings['sandbox']['allowUnsandboxedCommands'])
         self.assertNotIn('network', settings['sandbox'])
         self.assertIn('acceptEdits', call['args'])
+        self.assertNotIn('--add-dir', call['args'])
 
     def test_claude_error_or_denial_cannot_approve(self):
         for envelope in ({'is_error': True}, {'subtype': 'error'}, {'permission_denials': [{'tool_name': 'Write'}]}, {'structured_output': None}):

@@ -8,7 +8,7 @@ class Adapter(Harness):
     executable = 'claude'
     flags = ('--print', '--output-format', '--json-schema', '--permission-mode', '--permission-prompts',
              '--restricted', '--safe-mode', '--tools', '--disallowedTools', '--settings',
-             '--strict-mcp-config', '--mcp-config', '--no-session-persistence', '--model')
+             '--strict-mcp-config', '--mcp-config', '--no-session-persistence', '--model', '--add-dir')
 
     def invoke(self, role, prompt, worktree, run_dir, timeout, *, env, stopped):
         self.validate_role(role)
@@ -26,7 +26,8 @@ class Adapter(Harness):
                      '--settings', json.dumps(settings)]
         else:
             # No general shell: it cannot be made read-only with a tool denylist.
-            args += ['--permission-mode', 'manual', '--tools', 'Read,Grep,Glob',
+            args += ['--add-dir', str(run_dir.resolve()),
+                     '--permission-mode', 'manual', '--tools', 'Read,Grep,Glob',
                      '--disallowedTools', 'Edit,Write,NotebookEdit,Bash,Agent,Task',
                      '--json-schema', json.dumps(SCHEMA)]
         with source.open('rb') as stdin:
