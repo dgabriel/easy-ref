@@ -52,6 +52,7 @@ reviewer = "claude"
 # builder_model = "your-codex-model"
 # reviewer_model = "your-claude-model"
 checks = [["python3", "-m", "unittest"]]
+check_sandbox = "auto"  # auto, codex, none
 round_limit = 3
 timeout = 1800
 # builder_timeout = 1800
@@ -71,7 +72,7 @@ Its own `easy-ref.toml` runs `python3 -m unittest`.
 
 CLI overrides: `--builder`, `--reviewer`, `--builder-model`, `--reviewer-model`,
 `--round-limit`, `--timeout`, `--builder-timeout`, `--reviewer-timeout`,
-`--check-timeout`, `--worktree-root`, `--notifier`. Repeat `--check 'command args'`
+`--check-timeout`, `--check-sandbox`, `--worktree-root`, `--notifier`. Repeat `--check 'command args'`
 to replace the file's checks; quoting splits arguments but does not enable a shell.
 Unknown config fields, invalid values, and unknown adapters are refused.
 
@@ -136,10 +137,33 @@ These publishing guardrails are **best-effort, not isolation**:
 Codex uses workspace-write/read-only sandboxes. Claude confines file tools and
 requires a sandbox for builder shell commands, with unsandboxed fallback disabled.
 Claude and Pi reviewers have read-only tool allowlists without a general shell;
-independent configured checks run through easy-ref. **Check commands run
-builder-written code without a sandbox, with the owner's permissions.** For
-example, `python -m unittest` executes whatever tests the builder wrote. Treat
-check commands as trusted configuration and the code they execute as untrusted.
+independent configured checks run through easy-ref. Checks run in the Codex
+`:workspace` sandbox when available on macOS. This profile blocks writes outside
+the worktree and temporary directories, and blocks `.git` writes. It is not
+network or OS isolation beyond that profile; easy-ref adds no writable roots and
+does not enable network access.
+
+`check_sandbox = "auto"` (the default) verifies `codex sandbox --help` at run
+creation. If macOS, Codex, or the required options are unavailable, checks run
+unsandboxed and a warning is recorded. `codex` requires those prerequisites and
+refuses run creation otherwise; `none` explicitly runs unsandboxed with a warning.
+The resolved mode and executable are frozen in `run.json` across resumes and
+shown in status, stop summaries, and the reviewer's check section. Neither help
+verification nor fake tests prove that the native sandbox can start on a host;
+a sandbox execution failure stops the run with `NEEDS_OWNER`, without fallback.
+
+A small trusted Python launcher runs inside the sandbox without a shell. It
+starts the check argument array and reports its exit code separately from Codex's
+exit code. A missing completion receipt or failed sandbox process stops for the
+owner; an ordinary nonzero check exit still feeds the builder. The launcher uses
+Python isolated mode, DEVNULL input, and the same process group as Codex for
+cleanup. Push-block variables are supplied explicitly using
+`shell_environment_policy.set`, even if Codex filters inherited variables.
+
+Choosing `none` or falling back restores the risk of executing builder-written
+code with the owner's permissions. For example, `python -m unittest` executes
+whatever tests the builder wrote. Treat check commands as trusted configuration
+and the code they execute as untrusted.
 Harnesses still need normal service authentication/networking. See the [verified adapter flags and versions](docs/adapter-verification.md).
 There has been no real-model validation; tests use fake adapters/executables.
 
@@ -185,6 +209,5 @@ as an absolute file path alongside a stat summary. Shell-free reviewers can read
 the file; Claude receives read access to that attempt directory.
 
 Follow-ups: stronger OS/network isolation, semantic repeated-finding detection,
-running checks inside the harness sandbox (for example through `codex sandbox`
-on macOS), and broader platform support. Parallel orders, publishing/PR/merge workflows,
+and broader platform support. Parallel orders, publishing/PR/merge workflows,
 CI integration, a web UI, and cost/budget tracking are outside v1.

@@ -6,7 +6,7 @@ import tomllib
 from .adapters import REGISTRY
 
 DEFAULTS = {'builder': 'codex', 'reviewer': 'claude', 'checks': [], 'round_limit': 3,
-            'timeout': 1800, 'notifier': 'auto', 'allow_unsandboxed': False}
+            'check_sandbox': 'auto', 'timeout': 1800, 'notifier': 'auto', 'allow_unsandboxed': False}
 OPTIONAL = {'builder_model', 'reviewer_model', 'builder_timeout', 'reviewer_timeout',
             'check_timeout', 'worktree_root'}
 
@@ -30,6 +30,8 @@ def resolve(repo, overrides=None):
     if not isinstance(checks, list) or any(not isinstance(c, list) or not c or
             any(not isinstance(a, str) or not a or '\0' in a for a in c) for c in checks):
         raise ValueError('checks must be nonempty argument arrays')
+    if config['check_sandbox'] not in ('auto', 'codex', 'none'):
+        raise ValueError('unknown check_sandbox')
     if config['notifier'] not in ('auto', 'macos', 'terminal'):
         raise ValueError('unknown notifier')
     if type(config['allow_unsandboxed']) is not bool:

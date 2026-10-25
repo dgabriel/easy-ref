@@ -9,6 +9,7 @@ import subprocess
 
 from .core import ignored_fingerprint, fingerprint, git, load, push_env, refs, save
 from .process import execute
+from .check_sandbox import run as run_check
 from .verdict import parse
 
 
@@ -61,6 +62,7 @@ def finish(state, reason, status='NEEDS_OWNER', question='', origin='builder', n
     text = (f"{status}: {reason}\nRounds: {state['round']}\nBranch: {state['branch']}\n"
             f"Worktree: {state['worktree']}\nRemove manually when ready: "
             f"git -C {shlex.quote(state['repo'])} worktree remove -- {shlex.quote(state['worktree'])}\n"
+            f"Check sandbox: {state.get('check_sandbox', {'mode': 'none'})['mode']}\n"
             f"Checks: {json.dumps(state['checks'])}\nQuestion: {question}\n"
             f"Configuration changed: {state.get('config_changed', False)}\n"
             f"Warning: {state.get('warning', '')}\n"
@@ -115,7 +117,7 @@ def check(state, directory):
     for index, command in enumerate(state['config']['checks']):
         path = directory / f'check-{index + 1}.log'
         try:
-            code = guarded(state, lambda env: execute(command, state['worktree'], path,
+            code = guarded(state, lambda env: run_check(state.get('check_sandbox', {'mode': 'none'}), command, state['worktree'], path,
                            state['config'].get('check_timeout', state['config']['timeout']), env, lambda: stop_requested(state)))
         except Exception as exc:
             state['checks'].append({'command': command, 'exit_code': None,
@@ -126,8 +128,6 @@ def check(state, directory):
         state['checks'].append({'command': command, 'exit_code': code, 'output': path.read_text(errors='replace')})
         save(state)
     (directory / 'checks.json').write_text(json.dumps(state['checks'], indent=2))
-    if not state['checks']:
-        state['warning'] = 'No checks configured; nothing independent was verified.'
     config_changed(state)
     state['phase'] = 'review'
     save(state)
@@ -188,6 +188,7 @@ def prompt(state, role, directory):
         diff = full_diff.decode(errors='replace').strip()
     return (common + f"\nBase: {state['base']}\nHEAD: {head}\nDiff:\n{diff}\n"
             + '\nWorking-tree status:\n' + git(state['worktree'], 'status', '--porcelain=v1', '--untracked-files=all') + '\nInspect untracked files locally.\n' + '\nHand-back:\n' + state.get('handback', '') + '\nChecks:\n' + json.dumps(state['checks'])
+            + f"\nCheck sandbox: {state.get('check_sandbox', {'mode': 'none'})['mode']}\n"
             + f"\nConfiguration changed: {state.get('config_changed', False)}\n"
             + state.get('warning', '') + '\nReview read-only. Return strict verdict JSON with verdict, summary, required'
             ' (id, what, evidence), and owner_question only for NEEDS_OWNER.\n')

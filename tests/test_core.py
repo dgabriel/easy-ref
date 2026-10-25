@@ -3,11 +3,15 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 from easy_ref.core import create, git, load, push_env
 
 
 class RepoTest(unittest.TestCase):
     def setUp(self):
+        self.platform_patch = patch("easy_ref.check_sandbox.platform.system", return_value="Linux")
+        self.platform_patch.start()
+        self.addCleanup(self.platform_patch.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
