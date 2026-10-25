@@ -11,6 +11,7 @@ from .core import ignored_fingerprint, fingerprint, git, load, push_env, refs, s
 from .process import execute
 from .check_sandbox import run as run_check
 from .verdict import parse
+from .skills import section as skill_section
 
 
 class RunBusy(ValueError):
@@ -63,6 +64,7 @@ def finish(state, reason, status='NEEDS_OWNER', question='', origin='builder', n
             f"Worktree: {state['worktree']}\nRemove manually when ready: "
             f"git -C {shlex.quote(state['repo'])} worktree remove -- {shlex.quote(state['worktree'])}\n"
             f"Check sandbox: {state.get('check_sandbox', {'mode': 'none'})['mode']}\n"
+            f"Owner-supplied skills: {json.dumps(state.get('skills', {}))}\n"
             f"Checks: {json.dumps(state['checks'])}\nQuestion: {question}\n"
             f"Configuration changed: {state.get('config_changed', False)}\n"
             f"Warning: {state.get('warning', '')}\n"
@@ -165,6 +167,7 @@ def fix_order(state, verdict):
 
 
 def prompt(state, role, directory):
+    skills = skill_section(state, role)
     order = (Path(state['run_dir']) / 'order.md').read_text()
     common = (order + '\n\nNever push, open pull requests, merge, deploy, or delete branches.\n'
               + 'Ignored paths changed during prior reviews: ' + json.dumps(state.get('ignored_changes', [])) + '\n'
@@ -173,7 +176,7 @@ def prompt(state, role, directory):
     if role == 'builder':
         return (common + '\nRequired fixes:\n' + state.get('feedback', '') +
                 '\nDo not commit. easy-ref commits your changes. Start your hand-back with a one-line commit subject, 72 characters or fewer.\n' +
-                ('Keep this fix order with your edits; easy-ref will commit it with the fix: ' + state['fix_order'] if state.get('fix_order') else ''))
+                ('Keep this fix order with your edits; easy-ref will commit it with the fix: ' + state['fix_order'] if state.get('fix_order') else '') + skills)
     head = git(state['worktree'], 'rev-parse', 'HEAD')
     full_diff = subprocess.check_output(
         ['git', '-C', state['worktree'], '-c', 'core.hooksPath=/dev/null',
@@ -191,7 +194,7 @@ def prompt(state, role, directory):
             + f"\nCheck sandbox: {state.get('check_sandbox', {'mode': 'none'})['mode']}\n"
             + f"\nConfiguration changed: {state.get('config_changed', False)}\n"
             + state.get('warning', '') + '\nReview read-only. Return strict verdict JSON with verdict, summary, required'
-            ' (id, what, evidence), and owner_question only for NEEDS_OWNER.\n')
+            ' (id, what, evidence), and owner_question only for NEEDS_OWNER.\n' + skills)
 
 
 def call(state, directory, role, adapter):

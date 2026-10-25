@@ -85,6 +85,47 @@ shown in prompts and the stop summary. For example:
   --builder pi --reviewer claude --allow-unsandboxed
 ```
 
+## Owner-supplied skills
+
+Attach skills to either role in the owner's `easy-ref.toml`. For a sibling
+checkout named `skills`:
+
+```toml
+builder_skills = ["../skills/regression-testing"]
+reviewer_skills = ["../skills/spec-review"]
+```
+
+Or pass repeatable flags on `run`:
+
+```sh
+./easy-ref run ../target/work-orders/task.md --repo ../target \
+  --builder-skill ../skills/regression-testing \
+  --reviewer-skill ../skills/spec-review
+```
+
+Paths resolve against the owner's checkout, including paths passed on the CLI.
+Flags replace the configured list for that role; an omitted flag preserves it.
+Both lists default to empty, leaving the role's prompt unchanged.
+
+Skill text is **trusted owner input** and becomes part of the role's prompt.
+Each directory must contain `SKILL.md` with `---` frontmatter and a `name:`
+matching the directory name (a plain or quoted scalar). easy-ref copies that file
+and all direct `references/*.md` files in sorted order; it reads no other skill
+files. Selected files must be regular UTF-8 files. Symlinks in selected paths,
+duplicate names within a role, and more than 128 KiB of total UTF-8 text per role
+are refused. The same skill may be used by both roles.
+
+At run creation, text is frozen under `skills/<role>/<name>/` in the private run
+directory. `run.json` records names, file lists, and SHA-256 digests. A skill's
+digest covers the sorted filename-to-file-SHA-256 mapping encoded as compact JSON.
+Every round and resume reads and verifies the frozen files, never the sources;
+source edits require a new run. Missing or changed frozen files stop the loop.
+`status` and stop summaries show each role's names and digests.
+
+The prompt labels each file and places a precedence instruction before the skill
+text: easy-ref rules, the work order, and the required output format take
+precedence. Reviewers still return the required verdict JSON.
+
 ## Safety and limitations
 
 Agent work happens on `ref/<order-slug>` from the target's starting HEAD, in

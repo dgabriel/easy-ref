@@ -20,6 +20,7 @@ def parser():
     command.add_argument('order')
     command.add_argument('--repo', default='.')
     for role in ('builder', 'reviewer'):
+        command.add_argument('--' + role + '-skill', dest=role + '_skills', action='append')
         command.add_argument('--' + role, choices=REGISTRY)
         command.add_argument('--' + role + '-model')
         command.add_argument('--' + role + '-timeout', type=float)
@@ -81,7 +82,7 @@ def result_code(state):
 
 def display(state):
     keys = ('run_id', 'status', 'phase', 'round', 'branch', 'worktree', 'reason', 'question',
-            'warning', 'unsandboxed', 'ignored_changes', 'check_sandbox')
+            'warning', 'unsandboxed', 'ignored_changes', 'check_sandbox', 'skills')
     result = {key: state[key] for key in keys if key in state}
     result['checks'] = [{'command': c['command'], 'exit_code': c['exit_code']} for c in state['checks']]
     print(json.dumps(result, indent=2))

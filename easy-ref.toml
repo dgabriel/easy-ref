@@ -1,2 +1,4 @@
 checks = [["python3", "-m", "unittest"]]
 check_sandbox = "auto"
+builder_skills = []
+reviewer_skills = []
