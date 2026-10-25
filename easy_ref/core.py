@@ -8,6 +8,8 @@ import subprocess
 import uuid
 
 from .config import resolve
+from .skills import collect, freeze
+from .check_sandbox import resolve as resolve_check_sandbox
 
 
 def git(repo, *args):
@@ -83,6 +85,8 @@ def _create(repo, order, overrides=None):
     repo = Path(git(repo, 'rev-parse', '--show-toplevel')).resolve()
     gd = Path(git(repo, 'rev-parse', '--absolute-git-dir')).resolve()
     config, config_text = resolve(repo, overrides)
+    collected_skills = collect(repo, config)
+    check_sandbox, sandbox_warning = resolve_check_sandbox(config['check_sandbox'])
     slug = Path(order).stem
     branch = 'ref/' + slug
     git(repo, 'check-ref-format', '--branch', branch)
@@ -114,10 +118,10 @@ def _create(repo, order, overrides=None):
     (run_dir / 'order.md').write_text(order_text)
     state = dict(version=1, run_id=run_id, repo=str(repo), run_dir=str(run_dir), worktree=str(worktree),
                  branch=branch, base=base, config=config, round=0, phase='create', status='RUNNING',
-                 checks=[], required=[], decisions=[], reason='', question='', question_origin='',
-                 config_original=config_text,
+                 skills=freeze(run_dir, collected_skills), checks=[], required=[], decisions=[], reason='', question='', question_origin='',
+                 config_original=config_text, check_sandbox=check_sandbox,
                  unsandboxed=[role for role in ('builder', 'reviewer') if config[role] == 'pi'],
-                 warning='' if config['checks'] else 'No checks configured; nothing independent was verified.')
+                 warning=' '.join(filter(None, [sandbox_warning, '' if config['checks'] else 'No checks configured; nothing independent was verified.'])))
     save(state)
     try:
         git(repo, 'worktree', 'add', '-b', branch, str(worktree), base)

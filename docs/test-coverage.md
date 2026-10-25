@@ -93,3 +93,16 @@ results, Pi opt-in, and the complete CLI path using fake harness processes.
 Check commands still execute builder-written code without a sandbox. Running
 checks inside the harness sandbox and giving shell-free reviewers full-diff
 access above the inline cap remain follow-ups, as required by the adapter review.
+
+## Owner-supplied role skills
+
+All skill tests are in `tests/test_skills.py`; model calls use fake adapters only.
+
+| Work-order step | Implementation | Verification |
+| --- | --- | --- |
+| 1. Config and CLI | `config.resolve`, `__main__.parser` | `test_cli_replaces_each_roles_list`, `test_cli_preserves_unoverridden_role`, `test_invalid_config_lists` |
+| 2. Validate and freeze | `skills.collect`, `skills.freeze`, `core._create` | `test_invalid_sources_refused_before_worktree_creation`, `test_duplicates_and_role_byte_limits`, `test_role_prompts_frozen_across_rounds_and_resume` |
+| 3. Prompt and precedence | `skills.section`, `loop.prompt` | `test_role_prompts_frozen_across_rounds_and_resume`, `test_no_skills_leaves_both_prompts_unchanged` |
+| 4. Visibility | `__main__.display`, `loop.finish` | `test_role_prompts_frozen_across_rounds_and_resume` checks status JSON and stop summary |
+| 5. Fake-adapter coverage | `tests/test_skills.py` | Tests above, plus `test_corrupt_frozen_copy_stops_before_adapter` |
+| 6. Documentation | README's Owner-supplied skills section | Relative sibling-checkout TOML and CLI examples; trusted-input and freezing behavior documented |

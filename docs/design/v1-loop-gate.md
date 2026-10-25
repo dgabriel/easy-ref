@@ -62,5 +62,4 @@ checks run only local Python/Git commands, with no model calls.
   actual local subprocess timeout and cancellation.
 - Large diff cap; symlink fix-order directory refused; branch changes stop.
 
-No real-harness run is claimed. Commit 3 (harnesses), commit 4 (CLI completion and
-notifications), and commit 5 (full usage/safety documentation) await review.
+All v1 commits were reviewed and approved, and v1 merged in PR #1; see the [real smoke-run record](../adapter-verification.md#reviewer-reported-smoke-run).

@@ -9,7 +9,9 @@ import subprocess
 
 from .core import ignored_fingerprint, fingerprint, git, load, push_env, refs, save
 from .process import execute
+from .check_sandbox import run as run_check
 from .verdict import parse
+from .skills import section as skill_section
 
 
 class RunBusy(ValueError):
@@ -61,6 +63,8 @@ def finish(state, reason, status='NEEDS_OWNER', question='', origin='builder', n
     text = (f"{status}: {reason}\nRounds: {state['round']}\nBranch: {state['branch']}\n"
             f"Worktree: {state['worktree']}\nRemove manually when ready: "
             f"git -C {shlex.quote(state['repo'])} worktree remove -- {shlex.quote(state['worktree'])}\n"
+            f"Check sandbox: {state.get('check_sandbox', {'mode': 'none'})['mode']}\n"
+            f"Owner-supplied skills: {json.dumps(state.get('skills', {}))}\n"
             f"Checks: {json.dumps(state['checks'])}\nQuestion: {question}\n"
             f"Configuration changed: {state.get('config_changed', False)}\n"
             f"Warning: {state.get('warning', '')}\n"
@@ -115,7 +119,7 @@ def check(state, directory):
     for index, command in enumerate(state['config']['checks']):
         path = directory / f'check-{index + 1}.log'
         try:
-            code = guarded(state, lambda env: execute(command, state['worktree'], path,
+            code = guarded(state, lambda env: run_check(state.get('check_sandbox', {'mode': 'none'}), command, state['worktree'], path,
                            state['config'].get('check_timeout', state['config']['timeout']), env, lambda: stop_requested(state)))
         except Exception as exc:
             state['checks'].append({'command': command, 'exit_code': None,
@@ -126,8 +130,6 @@ def check(state, directory):
         state['checks'].append({'command': command, 'exit_code': code, 'output': path.read_text(errors='replace')})
         save(state)
     (directory / 'checks.json').write_text(json.dumps(state['checks'], indent=2))
-    if not state['checks']:
-        state['warning'] = 'No checks configured; nothing independent was verified.'
     config_changed(state)
     state['phase'] = 'review'
     save(state)
@@ -165,6 +167,14 @@ def fix_order(state, verdict):
 
 
 def prompt(state, role, directory):
+    skills = skill_section(state, role)
+    if skills:
+        closing = (
+            'Do not commit. Start your hand-back with a one-line commit subject, 72 characters or fewer.'
+            if role == 'builder' else
+            'Return only strict verdict JSON with verdict, summary, required (id, what, evidence), '
+            "and owner_question only for NEEDS_OWNER, not the skill's report format.")
+        skills += '\n' + closing + '\n'
     order = (Path(state['run_dir']) / 'order.md').read_text()
     common = (order + '\n\nNever push, open pull requests, merge, deploy, or delete branches.\n'
               + 'Ignored paths changed during prior reviews: ' + json.dumps(state.get('ignored_changes', [])) + '\n'
@@ -173,7 +183,7 @@ def prompt(state, role, directory):
     if role == 'builder':
         return (common + '\nRequired fixes:\n' + state.get('feedback', '') +
                 '\nDo not commit. easy-ref commits your changes. Start your hand-back with a one-line commit subject, 72 characters or fewer.\n' +
-                ('Keep this fix order with your edits; easy-ref will commit it with the fix: ' + state['fix_order'] if state.get('fix_order') else ''))
+                ('Keep this fix order with your edits; easy-ref will commit it with the fix: ' + state['fix_order'] if state.get('fix_order') else '') + skills)
     head = git(state['worktree'], 'rev-parse', 'HEAD')
     full_diff = subprocess.check_output(
         ['git', '-C', state['worktree'], '-c', 'core.hooksPath=/dev/null',
@@ -188,9 +198,10 @@ def prompt(state, role, directory):
         diff = full_diff.decode(errors='replace').strip()
     return (common + f"\nBase: {state['base']}\nHEAD: {head}\nDiff:\n{diff}\n"
             + '\nWorking-tree status:\n' + git(state['worktree'], 'status', '--porcelain=v1', '--untracked-files=all') + '\nInspect untracked files locally.\n' + '\nHand-back:\n' + state.get('handback', '') + '\nChecks:\n' + json.dumps(state['checks'])
+            + f"\nCheck sandbox: {state.get('check_sandbox', {'mode': 'none'})['mode']}\n"
             + f"\nConfiguration changed: {state.get('config_changed', False)}\n"
             + state.get('warning', '') + '\nReview read-only. Return strict verdict JSON with verdict, summary, required'
-            ' (id, what, evidence), and owner_question only for NEEDS_OWNER.\n')
+            ' (id, what, evidence), and owner_question only for NEEDS_OWNER.\n' + skills)
 
 
 def call(state, directory, role, adapter):
