@@ -86,6 +86,32 @@ class SkillTests(RepoTest):
         self.assertEqual(prompt(state, 'builder', directory), expected_builder)
         self.assertEqual(prompt(state, 'reviewer', directory), expected_reviewer)
 
+    def test_builder_skills_close_with_output_contract(self):
+        self.check_skill_output_contract('builder')
+
+    def test_reviewer_skills_close_with_output_contract(self):
+        self.check_skill_output_contract('reviewer')
+
+    def check_skill_output_contract(self, role):
+        contracts = {
+            'builder': 'Do not commit. Start your hand-back with a one-line commit subject, 72 characters or fewer.',
+            'reviewer': "Return only strict verdict JSON with verdict, summary, required (id, what, evidence), and owner_question only for NEEDS_OWNER, not the skill's report format.",
+        }
+        closing = contracts[role]
+        path = self.skill(role + '-output')
+        refs = path / 'references'
+        refs.mkdir()
+        (refs / 'output.md').write_text('Return a PASS/FAIL report.\n\n')
+        state = self.start(**{role + '_skills': [str(path)]})
+        directory = Path(state['run_dir'])
+        message = prompt(state, role, directory)
+        self.assertEqual(message.rstrip().splitlines()[-1], closing)
+        self.assertLess(message.index(PRECEDENCE), message.index(path.name + ' instructions'))
+        self.assertLess(message.index('Return a PASS/FAIL report.'), message.rindex(closing))
+        other = 'reviewer' if role == 'builder' else 'builder'
+        without_skills = dict(state, skills={}, config={**state['config'], role + '_skills': []})
+        self.assertEqual(prompt(state, other, directory), prompt(without_skills, other, directory))
+
     def test_invalid_sources_refused_before_worktree_creation(self):
         for case in ('missing', 'no-header', 'wrong-name', 'duplicate-name-field', 'unterminated',
                      'file-link', 'directory-link', 'reference-link', 'references-link',

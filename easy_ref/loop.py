@@ -168,6 +168,13 @@ def fix_order(state, verdict):
 
 def prompt(state, role, directory):
     skills = skill_section(state, role)
+    if skills:
+        closing = (
+            'Do not commit. Start your hand-back with a one-line commit subject, 72 characters or fewer.'
+            if role == 'builder' else
+            'Return only strict verdict JSON with verdict, summary, required (id, what, evidence), '
+            "and owner_question only for NEEDS_OWNER, not the skill's report format.")
+        skills += '\n' + closing + '\n'
     order = (Path(state['run_dir']) / 'order.md').read_text()
     common = (order + '\n\nNever push, open pull requests, merge, deploy, or delete branches.\n'
               + 'Ignored paths changed during prior reviews: ' + json.dumps(state.get('ignored_changes', [])) + '\n'
